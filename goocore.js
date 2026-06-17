@@ -4,7 +4,6 @@
     const T = 32, COLS = 50, ROWS = 30;
     const W = 800, H = 500;
 
-    // Конфигурация (публична для переопределения)
     const config = {
         G, JUMP, SPEED, MAXV, FRIC, T, COLS, ROWS, W, H,
         bgColor1: '#0f0f2a',
@@ -19,21 +18,30 @@
         pupil: '#1a2a1a'
     };
 
-    // Мир (публичен для чтения/записи)
     let world = [];
     let player = {
         x: 0, y: 0, vx: 0, vy: 0, w: 28, h: 28,
-        // Состояния: 1 - на полу, 0 - в воздухе
+        onFloor: false,
         getState() { return this.onFloor ? 1 : 0; }
     };
     let cam = { x: 0, y: 0 };
     let keys = {};
     let mouse = { x: W/2, y: H/2 };
-    let objects = []; // массив дополнительных объектов
+    let objects = [];
     let customUpdate = null;
     let customDraw = null;
 
-    // Вспомогательные функции
+    // Холст и контекст
+    const canvas = document.getElementById('c') || (() => {
+        const c = document.createElement('canvas');
+        c.id = 'c';
+        document.body.prepend(c);
+        return c;
+    })();
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
     function collides(x, y, w, h) {
         const x1 = Math.floor(x / T), x2 = Math.floor((x + w - 1) / T);
         const y1 = Math.floor(y / T), y2 = Math.floor((y + h - 1) / T);
@@ -61,7 +69,6 @@
         return false;
     }
 
-    // Генерация мира (только пол)
     function initWorld() {
         world = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
         for (let x = 0; x < COLS; x++) {
@@ -70,15 +77,14 @@
         }
     }
 
-    // Инициализация игрока
     function initPlayer() {
         player.x = 2 * T;
         player.y = (ROWS - 5) * T;
         player.vx = 0;
         player.vy = 0;
+        player.onFloor = false;
     }
 
-    // Обновление физики игрока
     function updatePlayer() {
         const p = player;
         let acc = 0;
@@ -122,7 +128,6 @@
         }
     }
 
-    // Обновление камеры
     function updateCam() {
         cam.x = player.x - W / 2;
         cam.y = player.y - H / 2;
@@ -130,8 +135,7 @@
         cam.y = Math.max(0, Math.min(cam.y, ROWS * T - H));
     }
 
-    // Отрисовка блоков и фона
-    function drawWorld(ctx, ox, oy) {
+    function drawWorld(ox, oy) {
         for (let r = 0; r < ROWS; r++) {
             for (let c = 0; c < COLS; c++) {
                 if (world[r][c] === 1) {
@@ -145,8 +149,7 @@
         }
     }
 
-    // Отрисовка игрока (по умолчанию)
-    function drawPlayer(ctx, ox, oy) {
+    function drawPlayer(ox, oy) {
         const p = player;
         const px = p.x + ox, py = p.y + oy;
         const cx = px + p.w / 2, cy = py + p.h / 2;
@@ -176,7 +179,7 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Глаза, смотрящие на курсор
+        // Глаза
         const mx = mouse.x, my = mouse.y;
         let dx = mx - (px + p.w / 2), dy = my - (py + p.h / 2);
         let dist = Math.hypot(dx, dy);
@@ -211,22 +214,19 @@
         ctx.fill();
     }
 
-    // Основной цикл обновления
     function update() {
         if (customUpdate) {
             customUpdate();
         } else {
             updatePlayer();
             updateCam();
-            // Обновление дополнительных объектов
             for (let obj of objects) {
                 if (obj.update) obj.update();
             }
         }
     }
 
-    // Основной цикл отрисовки
-    function draw(ctx) {
+    function draw() {
         const ox = -cam.x, oy = -cam.y;
         // Фон
         const grad = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 700);
@@ -238,23 +238,20 @@
         if (customDraw) {
             customDraw(ctx, ox, oy);
         } else {
-            drawWorld(ctx, ox, oy);
-            drawPlayer(ctx, ox, oy);
-            // Отрисовка дополнительных объектов
+            drawWorld(ox, oy);
+            drawPlayer(ox, oy);
             for (let obj of objects) {
                 if (obj.draw) obj.draw(ctx, ox, oy);
             }
         }
     }
 
-    // Основной цикл
     function loop() {
         update();
-        draw(ctx);
+        draw();
         requestAnimationFrame(loop);
     }
 
-    // Публичное API
     const GooCore = {
         config: config,
         world: world,
@@ -263,41 +260,35 @@
         keys: keys,
         mouse: mouse,
         objects: objects,
+        canvas: canvas,
+        ctx: ctx,
 
-        // Инициализация
         init: function() {
             initWorld();
             initPlayer();
             cam.x = 0; cam.y = 0;
-            // Сброс объектов
             objects.length = 0;
-            // Сброс кастомных функций
             customUpdate = null;
             customDraw = null;
         },
 
-        // Старт цикла
         start: function() {
             this.init();
             loop();
         },
 
-        // Регистрация объекта
         registerObject: function(obj) {
             objects.push(obj);
         },
 
-        // Установка кастомного обновления
         setCustomUpdate: function(fn) {
             customUpdate = fn;
         },
 
-        // Установка кастомной отрисовки
         setCustomDraw: function(fn) {
             customDraw = fn;
         },
 
-        // Вспомогательные функции для создания объектов
         createObject: function() {
             return {
                 x: 0, y: 0, w: 28, h: 28,
@@ -307,19 +298,16 @@
             };
         },
 
-        // Доступ к коллизиям для внешних объектов
         collides: collides,
         isOnFloor: isOnFloor
     };
 
-    // Экспорт в глобальную область
     window.GooCore = GooCore;
 
     // Обработчики ввода
     document.addEventListener('keydown', e => { GooCore.keys[e.code] = true; });
     document.addEventListener('keyup', e => { GooCore.keys[e.code] = false; });
-    const canvas = document.getElementById('c') || (() => { const c = document.createElement('canvas'); c.id='c'; document.body.prepend(c); return c; })();
-    canvas.width = W; canvas.height = H;
+
     canvas.addEventListener('mousemove', function(e) {
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
@@ -331,9 +319,5 @@
         GooCore.mouse.x = GooCore.player.x + GooCore.player.w / 2;
         GooCore.mouse.y = GooCore.player.y + GooCore.player.h / 2;
     });
-    // Чтобы canvas был доступен глобально
-    window.GooCoreCanvas = canvas;
-    // Контекст также доступен
-    window.GooCoreCtx = canvas.getContext('2d');
 
 })(window);
