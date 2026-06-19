@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Runner — новая игра на goocore</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: #0a0a1a;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            border-radius: 12px;
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.15);
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+    <!-- Подключаем оригинальный движок -->
+    <script src="https://offlinejust.github.io/goocore/goocore.js">
+    </script>
+
+    <script>
+        // ------------------------------------------------------------
+        // 1. НОВАЯ КОНФИГУРАЦИЯ — цвета, размеры, параметры
+        // ------------------------------------------------------------
+        const MY_CONFIG = {
+            gravity: 0.7,
+            jumpSpeed: -13,
+            moveSpeed: 1.4,
+            maxSpeed: 10,
+            friction: 0.82,
+            tileSize: 32,
+            cols: 50,
+            rows: 30,
+            totalCoins: 25,
+            enemyCount: 12,
+
+            // Цвета в неоновом стиле
+            playerColor: {
+                body: ['#00f0ff', '#0066cc'],
+                glow: 'rgba(0, 240, 255, 0.7)'
+            },
+            enemyColor: {
+                body: ['#ff3b6f', '#990033'],
+                glow: 'rgba(255, 59, 111, 0.7)'
+            },
+            coinColor: ['#ffe066', '#ffaa00', '#ff6600', '#cc3300'],
+            blockHue: 190, // базовый оттенок блоков
+        };
+
+        // ------------------------------------------------------------
+        // 2. ПЕРЕОПРЕДЕЛЯЕМ РЕНДЕРИНГ — НЕОНОВАЯ ГРАФИКА
+        // ------------------------------------------------------------
+
+        // ------ 2.1. Отрисовка мира (блоки + монеты-кристаллы) ------
+        Renderer.prototype.drawWorld = function(world, camera) {
+            const t = this.config.tileSize;
+            const ox = -camera.x;
+            const oy = -camera.y;
+            const sc = Math.max(0, Math.floor(camera.x / t));
+            const ec = Math.min(world.cols, Math.ceil((camera.x + this.W) / t) + 1);
+            const sr = Math.max(0, Math.floor(camera.y / t));
+            const er = Math.min(world.rows, Math.ceil((camera.y + this.H) / t) + 1);
+            const ctx = this.ctx;
+            const time = performance.now() / 1000;
+
+            for (let r = sr; r < er; r++) {
+                for (let c = sc; c < ec; c++) {
+                    const v = world.grid[r][c];
+                    const x = c * t + ox;
+                    const y = r * t + oy;
+
+                    if (v === 1) { // ----- БЛОК (неоновая панель) -----
+                        const hue = this.config.blockHue + Math.sin(time * 0.15 + r * 0.08 + c * 0.12) * 12;
+                        const grad = ctx.createRadialGradient(x + 6, y + 6, 2, x + 16, y + 16, 24);
+                        grad.addColorStop(0, `hsl(${hue + 20}, 80%, 70%)`);
+                        grad.addColorStop(0.5, `hsl(${hue}, 85%, 45%)`);
+                        grad.addColorStop(1, `hsl(${hue - 15}, 70%, 25%)`);
+
+                        ctx.shadowColor = `hsl(${hue}, 80%, 60%)`;
+                        ctx.shadowBlur = 18;
+                        ctx.fillStyle = grad;
+                        ctx.fillRect(x, y, t, t);
+                        ctx.shadowBlur = 0;
+
+                        // Светящаяся рамка
+                        ctx.strokeStyle = `hsla(${hue + 30}, 90%, 80%, 0.35)`;
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeRect(x + 1, y + 1, t - 2, t - 2);
+                    } else if (v === 3) { // ----- КРИСТАЛЛ (вместо монеты) -----
+                        const cx = x + t / 2;
+                        const cy = y + t / 2;
+                        const pulse = 1 + 0.08 * Math.sin(time * 2.5 + c + r);
+                        const rad = 12 * pulse;
+
+                        // Свечение
+                        const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad + 10);
+                        glow.addColorStop(0, 'rgba(255, 230, 100, 0.9)');
+                        glow.addColorStop(0.5, 'rgba(255, 180, 50, 0.6)');
+                        glow.addColorStop(1, 'rgba(255, 100, 0, 0)');
+                        ctx.fillStyle = glow;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, rad + 10, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Сам кристалл (ромб)
+                        ctx.shadowColor = '#ffcc44';
+                        ctx.shadowBlur = 30;
+                        ctx.fillStyle = '#ffe680';
+                        ctx.beginPath();
+                        ctx.moveTo(cx, cy - rad);
+                        ctx.lineTo(cx + rad * 0.7, cy);
+                        ctx.lineTo(cx, cy + rad);
+                        ctx.lineTo(cx - rad * 0.7, cy);
+                        ctx.closePath();
+                        ctx.fill();
+
+                        // Блик
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                        ctx.beginPath();
+                        ctx.arc(cx - 3, cy - 5, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+        };
+
+        // ------ 2.2. Отрисовка игрока / врагов (неоновые сферы) ------
+        const origDrawSlime = Renderer.prototype.drawSlime;
+        Renderer.prototype.drawSlime = function(x, y, w, h, state, isPlayer, spawn, config, coinTarget) {
+            const ctx = this.ctx;
+            const cx = x + w / 2;
+            const cy = y + h / 2;
+            const rad = w / 2 * (spawn && spawn < 1 ? spawn : 1);
+
+            ctx.save();
+
+            // ----- Основной шар с градиентом -----
+            const grad = ctx.createRadialGradient(cx - 4, cy - 6, 3, cx, cy, rad);
+            if (isPlayer) {
+                grad.addColorStop(0, '#88f0ff');
+                grad.addColorStop(0.6, '#00b8d4');
+                grad.addColorStop(1, '#004c8c');
+                ctx.shadowColor = 'rgba(0, 200, 255, 0.9)';
+            } else {
+                grad.addColorStop(0, '#ff6b8a');
+                grad.addColorStop(0.5, '#e6005c');
+                grad.addColorStop(1, '#8a0030');
+                ctx.shadowColor = 'rgba(255, 0, 100, 0.9)';
+            }
+            ctx.shadowBlur = 35;
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy + (state === 1 ? rad * 0.2 : state === 2 ? -rad * 0.2 : 0),
+                rad * 0.85, rad * 0.75, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ----- Глаза (только если не спавн) -----
+            if (!spawn) {
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'white';
+                const eyeOff = isPlayer ? 5 : 6;
+                ctx.beginPath();
+                ctx.arc(cx - eyeOff, cy - 4, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx + eyeOff, cy - 4, 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = isPlayer ? '#0a2a3a' : '#3a0a1a';
+                ctx.beginPath();
+                ctx.arc(cx - eyeOff + 2, cy - 2, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(cx + eyeOff + 2, cy - 2, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        };
+
+        // ------ 2.3. Фон с мерцающими звёздами ------
+        Renderer.prototype.clear = function() {
+            const ctx = this.ctx;
+            // Тёмный градиент
+            const grad = ctx.createRadialGradient(this.W / 2, this.H / 2, 50, this.W / 2, this.H / 2, 600);
+            const t = performance.now() / 1000;
+            grad.addColorStop(0, `rgb(${20 + 10 * Math.sin(t * 0.2)}, ${20 + 15 * Math.sin(t * 0.3 + 1)}, ${50 + 20 * Math.sin(t * 0.25 + 2)})`);
+            grad.addColorStop(1, `rgb(8, 8, 22)`);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, this.W, this.H);
+
+            // Мерцающие звёзды
+            if (!this._stars) {
+                this._stars = [];
+                for (let i = 0; i < 120; i++) {
+                    this._stars.push({
+                        x: Math.random() * this.W,
+                        y: Math.random() * this.H,
+                        r: 0.5 + Math.random() * 1.5,
+                        phase: Math.random() * 100,
+                        speed: 0.5 + Math.random() * 1.5
+                    });
+                }
+            }
+            for (const s of this._stars) {
+                const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = '#aaccff';
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = '#88bbff';
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+        };
+
+        // ------------------------------------------------------------
+        // 3. НОВЫЕ МЕХАНИКИ: двойной прыжок + рывок
+        // ------------------------------------------------------------
+
+        // ------ 3.1. Расширяем InputManager: добавляем клавишу Shift ------
+        const origInputUpdate = InputManager.prototype.updateState;
+        InputManager.prototype.updateState = function() {
+            origInputUpdate.call(this);
+            this.dash = this.keys['ShiftLeft'] || this.keys['ShiftRight'];
+        };
+
+        // ------ 3.2. Переопределяем Player.update ------
+        const origPlayerUpdate = Player.prototype.update;
+        Player.prototype.update = function(input, world) {
+            if (this.dead) return;
+            if (this.spawn) {
+                this.spawn += 0.035;
+                if (this.spawn > 1) this.spawn = 0;
+                return;
+            }
+
+            // --- движение ---
+            let acc = 0;
+            if (input.left) acc = -this.config.moveSpeed;
+            if (input.right) acc = this.config.moveSpeed;
+            this.vx += acc;
+            this.vx *= this.config.friction;
+            if (Math.abs(this.vx) > this.config.maxSpeed) this.vx = this.config.maxSpeed * Math.sign(this.vx);
+            if (Math.abs(this.vx) < 0.05) this.vx = 0;
+
+            // --- двойной прыжок ---
+            if (!this._jumpCount) this._jumpCount = 0;
+            const onFloor = this.isOnFloor(world);
+            const onCeil = this.isOnCeil(world);
+
+            if (onFloor || onCeil) {
+                this._jumpCount = 0;
+            }
+
+            if (input.jump && (onFloor || onCeil || this._jumpCount < 1)) {
+                if (!onFloor && !onCeil) this._jumpCount++;
+                this.vy = this.config.jumpSpeed - Math.min(0, this.vx * 0.12);
+                // Эффект прыжка (частицы)
+                if (window._game && window._game.particles) {
+                    for (let i = 0; i < 6; i++) {
+                        window._game.particles.particles.push({
+                            x: this.x + this.w / 2 + (Math.random() - 0.5) * 20,
+                            y: this.y + this.h,
+                            vx: (Math.random() - 0.5) * 3,
+                            vy: -Math.random() * 2 - 1,
+                            life: 10 + Math.random() * 10,
+                            maxLife: 20,
+                            color: '#88f0ff',
+                            size: 2 + Math.random() * 3,
+                            isCoin: false
+                        });
+                    }
+                }
+                input.jump = false; // предотвращаем залипание
+            }
+
+            // --- рывок (Shift) ---
+            if (input.dash && this._dashCooldown === undefined) this._dashCooldown = 0;
+            if (this._dashCooldown > 0) this._dashCooldown--;
+
+            if (input.dash && this._dashCooldown === 0 && Math.abs(this.vx) > 0.5) {
+                const dir = Math.sign(this.vx) || 1;
+                this.vx = dir * 18;
+                this._dashCooldown = 25;
+                // частицы рывка
+                if (window._game && window._game.particles) {
+                    for (let i = 0; i < 20; i++) {
+                        window._game.particles.particles.push({
+                            x: this.x + this.w / 2 + (Math.random() - 0.5) * 10,
+                            y: this.y + this.h / 2 + (Math.random() - 0.5) * 10,
+                            vx: -dir * (2 + Math.random() * 5),
+                            vy: (Math.random() - 0.5) * 3,
+                            life: 15 + Math.random() * 15,
+                            maxLife: 30,
+                            color: '#00ffff',
+                            size: 2 + Math.random() * 4,
+                            isCoin: false
+                        });
+                    }
+                }
+            }
+
+            // --- физика ---
+            this.updatePhysics(world);
+
+            // --- смерть от падения ---
+            if (this.y + this.h > this.config.rows * this.config.tileSize) {
+                this.dead = true;
+                this.respawnTimer = 0;
+            }
+        };
+
+        // ------------------------------------------------------------
+        // 4. ЗАПУСК ИГРЫ
+        // ------------------------------------------------------------
+
+        const canvas = document.getElementById('gameCanvas');
+        const game = new Game(canvas, MY_CONFIG);
+
+        // Сохраняем ссылку для частиц
+        window._game = game;
+
+        // Небольшое изменение: увеличиваем количество врагов при генерации
+        const origGenerate = Game.prototype.generateLevel;
+        Game.prototype.generateLevel = function() {
+            origGenerate.call(this);
+            // Добавляем ещё пару врагов для интереса
+            while (this.enemies.length < this.config.enemyCount + 3) {
+                const e = new Enemy(this.config, this.world);
+                this.enemies.push(e);
+            }
+        };
+
+        // Запускаем!
+        game.start();
+
+        // Адаптивный ресайз
+        window.addEventListener('resize', () => game.renderer.resize());
+
+        console.log('🔥 Neon Runner запущена!');
+        console.log('🕹  Управление: стрелки / WASD — движение, Пробел — прыжок (двойной!), Shift — рывок');
+    </script>
+</body>
+</html>
