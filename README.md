@@ -3,7 +3,8 @@
 - https://offlinejust.github.io/goocore/
 - https://offlinejust.github.io/goocore/goocore%20origins.html
 - https://offlinejust.github.io/goocore/goocore%20classed.html
-- https://offlinejust.github.io/goocore/goocore.js  
+- https://offlinejust.github.io/goocore/goocore.js
+- https://offlinejust.github.io/goocore/NeonRunner.html
 
 ## Проектные записи ядра  
 #### Бенчмарк при старте  
