@@ -5,6 +5,7 @@
 - https://offlinejust.github.io/goocore/games/goocore%20classed.html
 - https://offlinejust.github.io/goocore/goocore.js
 - https://offlinejust.github.io/goocore/games/NeonRunner.html
+- https://offlinejust.github.io/goocore/games/GoocoreSiege.html
 
 ## Проектные записи ядра  
 #### Бенчмарк при старте  
